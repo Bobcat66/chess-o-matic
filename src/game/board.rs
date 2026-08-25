@@ -2,6 +2,7 @@
 // You may use, distribute, and modify this software under the terms of
 // the license found in the root directory of this project
 
+use crate::game::board::MoveStatus::Illegal;
 use crate::game::{Color, Movable, Piece, PieceType, move_flags};
 use regex::Regex;
 use std::fmt;
@@ -11,7 +12,7 @@ use std::collections::HashMap;
 pub struct ChessMove {
     pub from: (usize, usize),
     pub to: (usize, usize),
-    pub promotion: Option<PieceType>,
+    pub promotion: Option<PieceType>
 }
 
 impl ChessMove {
@@ -55,29 +56,72 @@ impl ChessMove {
 
         Ok(ChessMove::new(from, to, promotion))
     }
+
+    pub fn to_uci(&self) -> String {
+        let mut uci: String = String::new();
+        uci.push((self.from.0 as u8 + b'a') as char);
+        uci.push((self.from.1 as u8 + b'1') as char);
+        uci.push((self.to.0 as u8 + b'a') as char);
+        uci.push((self.to.1 as u8 + b'1') as char);
+        if self.promotion.is_some() {
+            match self.promotion.unwrap() {
+                PieceType::Queen => uci.push('q'),
+                PieceType::Rook => uci.push('r'),
+                PieceType::Bishop => uci.push('b'),
+                PieceType::Knight => uci.push('n'),
+                // Theoretically these should never be called, should I have a failure case anyways just in case?
+                PieceType::King => {},
+                PieceType::Pawn => {}
+
+            }
+        }
+        uci
+    }
+
+    pub fn delta(&self) -> (i8,i8) {
+        (
+            self.to.0 as i8 - self.from.0 as i8,
+            self.to.1 as i8 - self.from.1 as i8
+        )
+    }
+}
+
+impl fmt::Display for ChessMove {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        return write!(f, "{}", self.to_uci());
+    }
 }
 
 // board analysis
 pub struct BoardAnal {
-    pub pieces: HashMap<(usize,usize),Vec<(usize,usize)>>, // hashmap of pieces and their legal squares
-    pub checking_pieces: HashMap<(usize,usize),Vec<(usize,usize)>> // hashmap of checking pieces and squares that would block their checks
+    pub white_pieces: HashMap<(usize,usize),Vec<(usize,usize)>>, // hashmap of white pieces and their legal squares
+    pub black_pieces: HashMap<(usize,usize),Vec<(usize,usize)>>, // hashmap of white pieces and their legal squares
 }
 
 impl BoardAnal {
     pub fn new() -> BoardAnal {
         BoardAnal {
-            pieces: HashMap::new(),
-            checking_pieces: HashMap::new()
+            white_pieces: HashMap::new(),
+            black_pieces: HashMap::new()
         }
     }
 
-    // returns all pieces attacking a square
-    pub fn attackers(&self, (file, rank): (usize, usize)) -> Vec<(usize,usize)> {
+    // returns all pieces of a given color attacking a square
+    pub fn attackers(&self, (file, rank): (usize, usize), color: Color) -> Vec<(usize,usize)> {
         let mut attackers: Vec<(usize,usize)> = Vec::new();
-        for piece in self.pieces.iter() {
+        for piece in match color {
+            Color::White => self.white_pieces.iter(),
+            Color::Black => self.black_pieces.iter()
+        }{
             if piece.1.contains(&(file,rank)) { attackers.push(piece.0.clone()); }
         }
         attackers
+    }
+
+    // gets checks on the king of the given color
+    pub fn get_checks(&self, color: Color) -> HashMap<(usize,usize),Vec<(usize,usize)>> {
+        let mut res = HashMap::new();
+        for check in 
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -282,18 +326,18 @@ impl Board {
             let mut f = file as i8;
             let mut r = rank as i8;
             // Handle special flags here
+            if flags & move_flags::BLACK_ONLY != 0 && piece.color != Color::Black {
+                continue;
+            }
+            if flags & move_flags::WHITE_ONLY != 0 && piece.color != Color::White {
+                continue;
+            }
             if flags & move_flags::EN_PASSANT != 0 {
                 if let Some((ep_file, ep_rank)) = self.en_passant_target {
                     if (f + df) as usize == ep_file && (r + dr) as usize == ep_rank {
                         squares.push((ep_file, ep_rank));
                     }
                 }
-                continue;
-            }
-            if flags & move_flags::BLACK_ONLY != 0 && piece.color != Color::Black {
-                continue;
-            }
-            if flags & move_flags::WHITE_ONLY != 0 && piece.color != Color::White {
                 continue;
             }
             if flags & move_flags::DOUBLEPAWN != 0 {
@@ -372,8 +416,35 @@ impl Board {
         anal
     }
 
+    pub fn anal_move(&self, chess_move: ChessMove) -> Result<BoardAnal,String> {
+        let mut fwd = self.clone();
+        if let Some(piece) = fwd.get(chess_move.from) {
+            fwd.edit_board(chess_move.from,None);
+            fwd.edit_board(
+                chess_move.to, 
+                if let Some(ptype) = chess_move.promotion {
+                    Some(Piece::new(piece.color,ptype))
+                } else {
+                    Some(piece)
+                });
+            Ok(fwd.anal())
+        } else {
+            Err("No piece at from square".into())
+        }
+    }
+
+    // Applies a transform to a piece on the board. For internal use only
+    fn apply_transform(&mut self, from: (usize,usize), to: (usize,usize)) {
+        self.squares[to.1][to.0] = self.get(from);
+        self.squares[from.1][from.0] = None;
+    }
+
+    pub fn edit_board(&mut self, square: (usize,usize), piece: Option<Piece>) {
+        self.squares[square.1][square.0] = piece;
+    }
+
+    // TODO: Add check logic. This is the main 
     pub fn try_move(&mut self, chess_move: ChessMove) -> Result<MoveStatus, String> {
-        let anal = self.anal();
         let (from_file, from_rank) = chess_move.from;
         let (to_file, to_rank) = chess_move.to;
 
@@ -391,15 +462,84 @@ impl Board {
             return Err("It's not this piece's turn to move".into());
         }
 
-        // For simplicity, we will just move the piece without checking legality
-        self.squares[to_rank][to_file] = Some(piece);
-        self.squares[from_rank][from_file] = None;
+        let anal = self.anal();
+        // check if we are in check now
+        if anal.checking_pieces
+        let fwdanal = self.anal_move(chess_move);
+        let valid_squares = anal.pieces.get(&chess_move.from).unwrap(); // This should be guaranteed as we already checked that there is a piece on the square
 
-        // Update the turn
-        self.to_move = match self.to_move {
-            Color::White => Color::Black,
-            Color::Black => Color::White,
-        };
+        if !valid_squares.contains(&chess_move.to) {
+            return Ok(MoveStatus::Illegal)
+        }
+
+        // check for check
+        
+
+        // special cases
+        match piece.kind {
+            PieceType::King => {
+                // Check if move is castle
+                if chess_move.delta().0.abs() == 2 {
+                    let delta = chess_move.delta();
+                    let final_attackers = anal.attackers(chess_move.to);
+                    let transit_attackers = anal.attackers(((to_file as i8 + (1 * (delta.0 / 2))) as usize,to_rank));
+                    for final_attacker in final_attackers {
+                        if self.get(final_attacker).unwrap().color != self.to_move {
+                            return Ok(MoveStatus::Illegal);
+                        }
+                    }
+                    for transit_attacker in transit_attackers {
+                        if self.get(transit_attacker).unwrap().color != self.to_move {
+                            return Ok(MoveStatus::Illegal)
+                        }
+                    }
+                    match delta.0 {
+                        // kingside
+                        2 => {
+                            self.apply_transform(chess_move.from,chess_move.to);
+                            self.apply_transform((chess_move.from.0 + 3, chess_move.from.1),(chess_move.to.0 - 1, chess_move.to.1));
+                            match self.to_move {
+                                Color::White => { self.castle_rights.0 = false; }
+                                Color::Black => { self.castle_rights.2 = false; }
+                            }
+                            return Ok(MoveStatus::Ok);
+                        },
+                        // queenside
+                        -2 => {
+                            self.apply_transform(chess_move.from,chess_move.to);
+                            self.apply_transform((chess_move.from.0 - 4, chess_move.from.1),(chess_move.to.0 + 1, chess_move.to.1));
+                            match self.to_move {
+                                Color::White => { self.castle_rights.1 = false; }
+                                Color::Black => { self.castle_rights.3 = false; }
+                            }
+                            return Ok(MoveStatus::Ok);
+                        }
+                        _ => {
+                            return Err("How does your castle have your king moving not two files bro".into()); // Again, this is impossible to reach
+                        }
+                    }
+                }
+            },
+            PieceType::Pawn => {
+                // En passant
+                if let Some(target) = self.en_passant_target {
+                    if chess_move.to.eq(&target) {
+
+                    }
+                }
+            }, 
+            _ => {
+                let fwdanal = self.anal_move(chess_move);
+            }
+        }
+        if piece.kind == PieceType::King {
+            
+        }
+        if chess_move.to.eq(self.)
+
+        // Normal case
+        // Ensure move doesn't put king in check 
+        self.apply_transform(chess_move.from, chess_move.to);
 
         Ok(MoveStatus::Ok)
     }
