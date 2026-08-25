@@ -2,6 +2,7 @@
 // You may use, distribute, and modify this software under the terms of
 // the license found in the root directory of this project
 
+use crate::game::PieceType::Pawn;
 use crate::game::board::MoveStatus::Illegal;
 use crate::game::{Color, Movable, Piece, PieceType, move_flags};
 use regex::Regex;
@@ -327,10 +328,14 @@ impl Board {
         self.squares[square.1][square.0] = piece;
     }
 
-    // Copies the board and applies a move to the copy, then returns the copy, allows "looking ahead" without editing the board itself
-    pub fn lookahead(&self, chess_move: ChessMove) -> Result<Board,String> {
+    // Copies the board and applies a move to the copy, then returns the copy, allows "looking ahead" without editing the board itself. 
+    pub fn lookahead(&self, chess_move: ChessMove, update_metadata: bool) -> Result<Board,String> {
         let mut fwd = self.clone();
         if let Some(piece) = fwd.get(chess_move.from) {
+            if update_metadata {
+                let reset_halfmove = piece.kind == PieceType::Pawn || fwd.get(chess_move.to).is_some();
+                fwd.update_metadata(reset_halfmove);
+            }
             fwd.edit_board(chess_move.from,None);
             fwd.edit_board(
                 chess_move.to, 
@@ -456,10 +461,23 @@ impl Board {
         BoardAnal::new(white_pieces,black_pieces,white_checking,black_checking)
     }
 
-    // Applies a transform to a piece on the board. For internal use only
-    fn apply_transform(&mut self, from: (usize,usize), to: (usize,usize)) {
+    // Applies a transform to a piece on the board. Returns if a piece was captured For internal use only
+    fn apply_transform(&mut self, from: (usize,usize), to: (usize,usize)) -> bool {
+        let capture = self.get(to).is_some();
         self.squares[to.1][to.0] = self.get(from);
         self.squares[from.1][from.0] = None;
+        capture
+    }
+
+    // updates metadata for a move (updates halfmove clock, move number, and side to move)
+    pub fn update_metadata(&mut self, reset_halfmove: bool) {
+        if reset_halfmove {
+            self.halfmove_clock = 0;
+        } else {
+            self.halfmove_clock += 1;
+        }
+        if self.to_move == Color::Black { self.fullmove_number += 1 }
+        self.to_move = self.to_move.opposite();
     }
 
     // TODO: Add check logic. This is the main 
@@ -490,7 +508,7 @@ impl Board {
             return Ok(MoveStatus::Illegal)
         }
 
-        let fwd = self.lookahead(chess_move)?;
+        let fwd = self.lookahead(chess_move,true)?;
         let fwdanal = fwd.anal();
         if fwdanal.in_check(self.to_move) {
             return Ok(MoveStatus::Illegal);
@@ -534,6 +552,8 @@ impl Board {
                         }
                     }
                 }
+                // normal case
+                self.apply_transform(chess_move.from, chess_move.to);
             },
             PieceType::Pawn => {
                 // En passant
@@ -546,10 +566,6 @@ impl Board {
             _ => {
             }
         }
-        if piece.kind == PieceType::King {
-            
-        }
-        if chess_move.to.eq(self.)
 
         // Normal case
         // Ensure move doesn't put king in check 
