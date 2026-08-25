@@ -94,34 +94,45 @@ impl fmt::Display for ChessMove {
 
 // board analysis
 pub struct BoardAnal {
-    pub white_pieces: HashMap<(usize,usize),Vec<(usize,usize)>>, // hashmap of white pieces and their legal squares
-    pub black_pieces: HashMap<(usize,usize),Vec<(usize,usize)>>, // hashmap of white pieces and their legal squares
+    white_pieces: HashMap<(usize,usize),Vec<(usize,usize)>>, // hashmap of white pieces and their legal squares
+    black_pieces: HashMap<(usize,usize),Vec<(usize,usize)>>, // hashmap of white pieces and their legal squares
+    white_checking: bool, // whether or not white is giving check
+    black_checking: bool, // whether or not black is giving check
 }
 
 impl BoardAnal {
-    pub fn new() -> BoardAnal {
+    pub fn new(white_pieces: HashMap<(usize,usize),Vec<(usize,usize)>>, black_pieces: HashMap<(usize,usize),Vec<(usize,usize)>>, white_checking: bool, black_checking: bool) -> BoardAnal {
         BoardAnal {
-            white_pieces: HashMap::new(),
-            black_pieces: HashMap::new()
+            white_pieces: white_pieces,
+            black_pieces: black_pieces,
+            white_checking: white_checking,
+            black_checking: black_checking
         }
+    }
+
+    pub fn pieces(&self, color: Color) -> &HashMap<(usize,usize),Vec<(usize,usize)>> {
+        match color {
+            Color::White => &self.white_pieces,
+            Color::Black => &self.black_pieces
+        }
+    }
+
+    // if the given color is in check
+    pub fn in_check(&self, color: Color) -> bool {
+        match color {
+            Color::White => self.black_checking,
+            Color::Black => self.white_checking
+        }
+        // reversed because black_checking is if black is *giving check*, and vice versa for white_checking
     }
 
     // returns all pieces of a given color attacking a square
     pub fn attackers(&self, (file, rank): (usize, usize), color: Color) -> Vec<(usize,usize)> {
         let mut attackers: Vec<(usize,usize)> = Vec::new();
-        for piece in match color {
-            Color::White => self.white_pieces.iter(),
-            Color::Black => self.black_pieces.iter()
-        }{
+        for piece in self.pieces(color) {
             if piece.1.contains(&(file,rank)) { attackers.push(piece.0.clone()); }
         }
         attackers
-    }
-
-    // gets checks on the king of the given color
-    pub fn get_checks(&self, color: Color) -> HashMap<(usize,usize),Vec<(usize,usize)>> {
-        let mut res = HashMap::new();
-        for check in 
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -312,16 +323,38 @@ impl Board {
         self.squares[rank][file]
     }
 
-    // returns all legal squares for a given piece, and a list of all squares that could block check if this piece is giving check
-    pub fn get_piece_squares(&self,(file, rank): (usize, usize)) -> (Option<Vec<(usize,usize)>>, Option<Vec<(usize,usize)>>) {
+    pub fn edit_board(&mut self, square: (usize,usize), piece: Option<Piece>) {
+        self.squares[square.1][square.0] = piece;
+    }
+
+    // Copies the board and applies a move to the copy, then returns the copy, allows "looking ahead" without editing the board itself
+    pub fn lookahead(&self, chess_move: ChessMove) -> Result<Board,String> {
+        let mut fwd = self.clone();
+        if let Some(piece) = fwd.get(chess_move.from) {
+            fwd.edit_board(chess_move.from,None);
+            fwd.edit_board(
+                chess_move.to, 
+                if let Some(ptype) = chess_move.promotion {
+                    Some(Piece::new(piece.color,ptype))
+                } else {
+                    Some(piece)
+                });
+            Ok(fwd)
+        } else {
+            Err("No piece at from square".into())
+        }
+    }
+
+    // returns all legal squares for a given piece, and whether or not this piece is giving check
+    fn get_piece_squares(&self,(file, rank): (usize, usize)) -> (Option<Vec<(usize,usize)>>, bool) {
         let piece_opt = self.get((file, rank));
         if piece_opt.is_none() { 
-            return (None,None);
+            return (None,false);
         }
         let piece = piece_opt.unwrap();
         let pattern = piece.kind.move_pattern();
         let mut squares: Vec<(usize,usize)> = Vec::new();
-        let mut blocking_squares: Option<Vec<(usize,usize)>> = None;
+        let mut checking: bool = false;
         for &(df, dr, flags) in pattern {
             let mut f = file as i8;
             let mut r = rank as i8;
@@ -366,7 +399,6 @@ impl Board {
                 if self.get((f as usize - 1, r as usize)).is_some() { continue; } // we only check one square because the other will be checked in the loop
                 // This is really chopped lol. We can subtract 1 from usize safely and trust our check in get because we know it'll overflow
             }
-            let mut blocking_squares_temp: Vec<(usize,usize)> = Vec::new();
             loop {
                 f += df;
                 r += dr;
@@ -377,7 +409,7 @@ impl Board {
                 if let Some(target_piece) = target_square {
                     if target_piece.color != piece.color && flags & move_flags::MOVE_ONLY == 0 {
                         if target_piece.kind == PieceType::King {
-                            blocking_squares = Some(blocking_squares_temp);
+                            checking = true;
                         }
                         squares.push((f as usize, r as usize));
                     }
@@ -388,59 +420,46 @@ impl Board {
                     }
                     squares.push((f as usize, r as usize));
                 }
-                blocking_squares_temp.push((f as usize, r as usize));
                 if flags & move_flags::NON_REPEATABLE != 0 {
                     break; // Stop if the move is non-repeatable
                 }
             }
         }
-        (Some(squares),blocking_squares)
+        (Some(squares),checking)
     }
 
     // short for "analysis"
     pub fn anal(&self) -> BoardAnal {
-        let mut anal: BoardAnal = BoardAnal::new();
+        let mut white_pieces: HashMap<(usize,usize),Vec<(usize,usize)>> = HashMap::new();
+        let mut black_pieces: HashMap<(usize,usize),Vec<(usize,usize)>> = HashMap::new();
+        let mut white_checking: bool = false;
+        let mut black_checking: bool = false;
         for (rindex, rank) in self.squares.iter().enumerate() {
-            for (findex, piece) in rank.iter().enumerate() {
-                if piece.is_some() {
+            for (findex, piece_opt) in rank.iter().enumerate() {
+                if let Some(piece) = piece_opt {
                     let piece_square_result = self.get_piece_squares((findex,rindex));
                     if let Some(piece_squares) = piece_square_result.0 {
-                        anal.pieces.insert((rindex,findex), piece_squares);
+                        match piece.color {
+                            Color::White => { &mut white_pieces },
+                            Color::Black => { &mut black_pieces }
+                        }.insert((rindex,findex), piece_squares);
                     }
-                    if let Some(checking_squares) = piece_square_result.1 {
-                        anal.checking_pieces.insert((rindex, findex), checking_squares);
+                    if piece_square_result.1 {
+                        match piece.color {
+                            Color::White => { white_checking = true },
+                            Color::Black => { black_checking = true }
+                        }
                     }
                 }
             }
         }
-        anal
-    }
-
-    pub fn anal_move(&self, chess_move: ChessMove) -> Result<BoardAnal,String> {
-        let mut fwd = self.clone();
-        if let Some(piece) = fwd.get(chess_move.from) {
-            fwd.edit_board(chess_move.from,None);
-            fwd.edit_board(
-                chess_move.to, 
-                if let Some(ptype) = chess_move.promotion {
-                    Some(Piece::new(piece.color,ptype))
-                } else {
-                    Some(piece)
-                });
-            Ok(fwd.anal())
-        } else {
-            Err("No piece at from square".into())
-        }
+        BoardAnal::new(white_pieces,black_pieces,white_checking,black_checking)
     }
 
     // Applies a transform to a piece on the board. For internal use only
     fn apply_transform(&mut self, from: (usize,usize), to: (usize,usize)) {
         self.squares[to.1][to.0] = self.get(from);
         self.squares[from.1][from.0] = None;
-    }
-
-    pub fn edit_board(&mut self, square: (usize,usize), piece: Option<Piece>) {
-        self.squares[square.1][square.0] = piece;
     }
 
     // TODO: Add check logic. This is the main 
@@ -464,15 +483,18 @@ impl Board {
 
         let anal = self.anal();
         // check if we are in check now
-        if anal.checking_pieces
-        let fwdanal = self.anal_move(chess_move);
-        let valid_squares = anal.pieces.get(&chess_move.from).unwrap(); // This should be guaranteed as we already checked that there is a piece on the square
+        
+        let valid_squares = anal.pieces(self.to_move).get(&chess_move.from).unwrap(); // This should be guaranteed as we already checked that there is a piece on the square
 
         if !valid_squares.contains(&chess_move.to) {
             return Ok(MoveStatus::Illegal)
         }
 
-        // check for check
+        let fwd = self.lookahead(chess_move)?;
+        let fwdanal = fwd.anal();
+        if fwdanal.in_check(self.to_move) {
+            return Ok(MoveStatus::Illegal);
+        }
         
 
         // special cases
@@ -481,17 +503,10 @@ impl Board {
                 // Check if move is castle
                 if chess_move.delta().0.abs() == 2 {
                     let delta = chess_move.delta();
-                    let final_attackers = anal.attackers(chess_move.to);
-                    let transit_attackers = anal.attackers(((to_file as i8 + (1 * (delta.0 / 2))) as usize,to_rank));
-                    for final_attacker in final_attackers {
-                        if self.get(final_attacker).unwrap().color != self.to_move {
-                            return Ok(MoveStatus::Illegal);
-                        }
-                    }
-                    for transit_attacker in transit_attackers {
-                        if self.get(transit_attacker).unwrap().color != self.to_move {
-                            return Ok(MoveStatus::Illegal)
-                        }
+                    let final_attackers = anal.attackers(chess_move.to,self.to_move.opposite());
+                    let transit_attackers = anal.attackers(((to_file as i8 + (1 * (delta.0 / 2))) as usize,to_rank),self.to_move.opposite());
+                    if final_attackers.len() > 0 || transit_attackers.len() > 0 {
+                        return Ok(MoveStatus::Illegal)
                     }
                     match delta.0 {
                         // kingside
@@ -529,7 +544,6 @@ impl Board {
                 }
             }, 
             _ => {
-                let fwdanal = self.anal_move(chess_move);
             }
         }
         if piece.kind == PieceType::King {
