@@ -21,27 +21,27 @@ pub mod move_flags {
 pub mod move_patterns {
     use super::move_flags::*;
     pub const PAWN_MOVES: [(i8,i8,u16); 14] = [
-        ( 1,  0, MOVE_ONLY | R8_PROMOTION | NON_REPEATABLE | WHITE_ONLY),
-        (-1,  0, MOVE_ONLY | R1_PROMOTION | NON_REPEATABLE | BLACK_ONLY),
+        ( 0,  1, MOVE_ONLY | R8_PROMOTION | NON_REPEATABLE | WHITE_ONLY),
+        ( 0, -1, MOVE_ONLY | R1_PROMOTION | NON_REPEATABLE | BLACK_ONLY),
         ( 1,  1, CAPTURE_ONLY | R8_PROMOTION | NON_REPEATABLE | WHITE_ONLY),
         (-1, -1, CAPTURE_ONLY | R1_PROMOTION | NON_REPEATABLE | BLACK_ONLY),
-        ( 2,  0, MOVE_ONLY | WHITE_ONLY | DOUBLEPAWN | NON_REPEATABLE),
-        (-2,  0, MOVE_ONLY | BLACK_ONLY | DOUBLEPAWN | NON_REPEATABLE),
+        ( 0,  2, MOVE_ONLY | WHITE_ONLY | DOUBLEPAWN | NON_REPEATABLE),
+        ( 0, -2, MOVE_ONLY | BLACK_ONLY | DOUBLEPAWN | NON_REPEATABLE),
         ( 1,  1, CAPTURE_ONLY | WHITE_ONLY | R8_PROMOTION | NON_REPEATABLE),
-        ( 1, -1, CAPTURE_ONLY | WHITE_ONLY | R8_PROMOTION | NON_REPEATABLE),
-        (-1,  1, CAPTURE_ONLY | BLACK_ONLY | R1_PROMOTION | NON_REPEATABLE),
+        (-1,  1, CAPTURE_ONLY | WHITE_ONLY | R8_PROMOTION | NON_REPEATABLE),
+        ( 1, -1, CAPTURE_ONLY | BLACK_ONLY | R1_PROMOTION | NON_REPEATABLE),
         (-1, -1, CAPTURE_ONLY | BLACK_ONLY | R1_PROMOTION | NON_REPEATABLE),
         ( 1,  1, EN_PASSANT | WHITE_ONLY | R8_PROMOTION | NON_REPEATABLE),
-        ( 1, -1, EN_PASSANT | WHITE_ONLY | R8_PROMOTION | NON_REPEATABLE),
-        (-1,  1, EN_PASSANT | BLACK_ONLY | R1_PROMOTION | NON_REPEATABLE),
+        (-1,  1, EN_PASSANT | WHITE_ONLY | R8_PROMOTION | NON_REPEATABLE),
+        ( 1, -1, EN_PASSANT | BLACK_ONLY | R1_PROMOTION | NON_REPEATABLE),
         (-1, -1, EN_PASSANT | BLACK_ONLY | R1_PROMOTION | NON_REPEATABLE)
     ];
 
     pub const ROOK_MOVES: [(i8,i8,u16); 4] = [
-        ( 1,  0, NONE),
-        (-1,  0, NONE),
         ( 0,  1, NONE),
-        ( 0, -1, NONE)
+        ( 0, -1, NONE),
+        ( 1,  0, NONE),
+        (-1,  0, NONE)
     ];
 
     pub const KNIGHT_MOVES: [(i8,i8,u16); 8] = [
@@ -82,8 +82,8 @@ pub mod move_patterns {
         ( 1, -1, NON_REPEATABLE),
         (-1,  1, NON_REPEATABLE),
         (-1, -1, NON_REPEATABLE),
-        ( 0,  2, KINGS_CASTLE | NON_REPEATABLE),
-        ( 0, -2, QUEENS_CASTLE | NON_REPEATABLE)
+        ( 2,  0, KINGS_CASTLE | NON_REPEATABLE | MOVE_ONLY),
+        (-2,  0, QUEENS_CASTLE | NON_REPEATABLE | MOVE_ONLY)
     ];
 }
 // A move is represented as a tuple of (rank_delta, file_delta, flags). The rank and file deltas are relative to the piece's current position. The flags are a bitfield that describes the move's properties.

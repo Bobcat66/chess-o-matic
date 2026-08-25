@@ -59,8 +59,26 @@ impl ChessMove {
 
 // board analysis
 pub struct BoardAnal {
-    pub piece_moves: HashMap<(usize,usize),Vec<(usize,usize)>>, // hashmap of pieces and their legal squares
+    pub pieces: HashMap<(usize,usize),Vec<(usize,usize)>>, // hashmap of pieces and their legal squares
     pub checking_pieces: HashMap<(usize,usize),Vec<(usize,usize)>> // hashmap of checking pieces and squares that would block their checks
+}
+
+impl BoardAnal {
+    pub fn new() -> BoardAnal {
+        BoardAnal {
+            pieces: HashMap::new(),
+            checking_pieces: HashMap::new()
+        }
+    }
+
+    // returns all pieces attacking a square
+    pub fn attackers(&self, (file, rank): (usize, usize)) -> Vec<(usize,usize)> {
+        let mut attackers: Vec<(usize,usize)> = Vec::new();
+        for piece in self.pieces.iter() {
+            if piece.1.contains(&(file,rank)) { attackers.push(piece.0.clone()); }
+        }
+        attackers
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MoveStatus {
@@ -293,12 +311,16 @@ impl Board {
                     Color::White => if !self.castle_rights.0 { continue; }
                     Color::Black => if !self.castle_rights.2 { continue; }
                 }
+                if self.get((f as usize + 1, r as usize)).is_some() { continue; } // we only check one square because the other will be checked in the loop
+                // This is really chopped lol
             }
             if flags & move_flags::QUEENS_CASTLE != 0 {
                 match piece.color {
                     Color::White => if !self.castle_rights.1 { continue; }
                     Color::Black => if !self.castle_rights.3 { continue; }
                 }
+                if self.get((f as usize - 1, r as usize)).is_some() { continue; } // we only check one square because the other will be checked in the loop
+                // This is really chopped lol. We can subtract 1 from usize safely and trust our check in get because we know it'll overflow
             }
             let mut blocking_squares_temp: Vec<(usize,usize)> = Vec::new();
             loop {
@@ -331,11 +353,27 @@ impl Board {
         (Some(squares),blocking_squares)
     }
 
-    pub fn is_check(&mut self, )
+    // short for "analysis"
+    pub fn anal(&self) -> BoardAnal {
+        let mut anal: BoardAnal = BoardAnal::new();
+        for (rindex, rank) in self.squares.iter().enumerate() {
+            for (findex, piece) in rank.iter().enumerate() {
+                if piece.is_some() {
+                    let piece_square_result = self.get_piece_squares((findex,rindex));
+                    if let Some(piece_squares) = piece_square_result.0 {
+                        anal.pieces.insert((rindex,findex), piece_squares);
+                    }
+                    if let Some(checking_squares) = piece_square_result.1 {
+                        anal.checking_pieces.insert((rindex, findex), checking_squares);
+                    }
+                }
+            }
+        }
+        anal
+    }
 
     pub fn try_move(&mut self, chess_move: ChessMove) -> Result<MoveStatus, String> {
-        // Implementation for applying a move to the board
-        // This is a placeholder implementation and should be replaced with actual move logic
+        let anal = self.anal();
         let (from_file, from_rank) = chess_move.from;
         let (to_file, to_rank) = chess_move.to;
 
