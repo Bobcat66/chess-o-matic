@@ -5,4 +5,4 @@ edition = "2024"
 
 [dependencies]
 regex = "1.13.1"
-
+rand = "0.10.2"

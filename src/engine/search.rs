@@ -32,6 +32,16 @@ fn quiescence<E: Evaluator>(board: &Board, alpha: i32, beta: i32) -> i32 {
     if stand_pat >= beta {
         return beta;
     }
-    alpha = cmp::max(alpha, stand_pat);
+    let mut alpha = cmp::max(alpha, stand_pat);
     
+    let captures = anal.captures(board.to_move);
+    for capture in captures {
+        let child = board.lookahead(capture).unwrap();
+        let score= -quiescence::<E>(&child, -beta, -alpha);
+        if score >= beta { return beta; }
+        alpha = cmp::max(alpha,score);
+    }
+
+    return alpha;
+
 }
