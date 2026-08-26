@@ -2,6 +2,8 @@
 // You may use, distribute, and modify this software under the terms of
 // the license found in the root directory of this project
 
+use std::fmt;
+
 // MOVE FLAGS
 pub mod move_flags {
     pub const NONE: u16 =           0b0000000000000000; // No special flags
@@ -112,6 +114,25 @@ impl Movable for PieceType {
     }
 }
 
+impl PieceType {
+    pub fn what(&self) -> &str {
+        match self {
+            PieceType::Pawn => "Pawn",
+            PieceType::Rook => "Rook",
+            PieceType::Knight => "Knight",
+            PieceType::Bishop => "Bishop",
+            PieceType::Queen => "Queen",
+            PieceType::King => "King",
+        }
+    }
+}
+
+impl fmt::Display for PieceType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        return write!(f, "{}", self.what());
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Color {
     White,
@@ -124,6 +145,18 @@ impl Color {
             Color::White => Color::Black,
             Color::Black => Color::White
         }
+    }
+    pub fn what(&self) -> &str {
+        match self {
+            Color::White => "White",
+            Color::Black => "Black"
+        }
+    }
+}
+
+impl fmt::Display for Color {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        return write!(f, "{}", self.what());
     }
 }
 
@@ -141,3 +174,10 @@ impl Piece {
         }
     }
 }
+
+impl fmt::Display for Piece {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        return write!(f, "{} {}", self.color, self.kind);
+    }
+}
+
