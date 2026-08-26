@@ -6,8 +6,8 @@
 pub mod move_flags {
     pub const NONE: u16 =           0b0000000000000000; // No special flags
     pub const NON_REPEATABLE: u16 = 0b0000000000000001; // If a move pattern is not repeatable (e.g. a knight's or king's move)
-    pub const R8_PROMOTION: u16 =   0b0000000000000010; // If a move pattern can result in a promotion on rank 8 (e.g. a pawn's forward move)
-    pub const R1_PROMOTION: u16 =   0b0000000000000100; // If a move pattern can result in a promotion on rank 1 (e.g. a pawn's forward move)
+    pub const R8_PROMOTION: u16 =   0b0000000000000010; // If a move pattern can result in a promotion on rank 8 (e.g. a pawn's forward move). Unused for now
+    pub const R1_PROMOTION: u16 =   0b0000000000000100; // If a move pattern can result in a promotion on rank 1 (e.g. a pawn's forward move). Unused for now
     pub const DOUBLEPAWN: u16 =     0b0000000000001000; // If a move pattern is a double pawn move
     pub const MOVE_ONLY: u16 =      0b0000000000010000; // If a move pattern can only be used to move to an empty square (e.g. a pawn's forward move)
     pub const CAPTURE_ONLY: u16 =   0b0000000000100000; // If a move pattern can only be used to capture an enemy piece (e.g. a pawn's diagonal capture)
@@ -20,17 +20,15 @@ pub mod move_flags {
 
 pub mod move_patterns {
     use super::move_flags::*;
-    pub const PAWN_MOVES: [(i8,i8,u16); 14] = [
+    pub const PAWN_MOVES: [(i8,i8,u16); 12] = [
         ( 0,  1, MOVE_ONLY | R8_PROMOTION | NON_REPEATABLE | WHITE_ONLY),
         ( 0, -1, MOVE_ONLY | R1_PROMOTION | NON_REPEATABLE | BLACK_ONLY),
         ( 1,  1, CAPTURE_ONLY | R8_PROMOTION | NON_REPEATABLE | WHITE_ONLY),
         (-1, -1, CAPTURE_ONLY | R1_PROMOTION | NON_REPEATABLE | BLACK_ONLY),
         ( 0,  2, MOVE_ONLY | WHITE_ONLY | DOUBLEPAWN | NON_REPEATABLE),
         ( 0, -2, MOVE_ONLY | BLACK_ONLY | DOUBLEPAWN | NON_REPEATABLE),
-        ( 1,  1, CAPTURE_ONLY | WHITE_ONLY | R8_PROMOTION | NON_REPEATABLE),
         (-1,  1, CAPTURE_ONLY | WHITE_ONLY | R8_PROMOTION | NON_REPEATABLE),
         ( 1, -1, CAPTURE_ONLY | BLACK_ONLY | R1_PROMOTION | NON_REPEATABLE),
-        (-1, -1, CAPTURE_ONLY | BLACK_ONLY | R1_PROMOTION | NON_REPEATABLE),
         ( 1,  1, EN_PASSANT | WHITE_ONLY | R8_PROMOTION | NON_REPEATABLE),
         (-1,  1, EN_PASSANT | WHITE_ONLY | R8_PROMOTION | NON_REPEATABLE),
         ( 1, -1, EN_PASSANT | BLACK_ONLY | R1_PROMOTION | NON_REPEATABLE),

@@ -2,8 +2,6 @@
 // You may use, distribute, and modify this software under the terms of
 // the license found in the root directory of this project
 
-use crate::game::PieceType::Pawn;
-use crate::game::board::MoveStatus::{Illegal, InCheck};
 use crate::game::{Color, Movable, Piece, PieceType, move_flags};
 use regex::Regex;
 use std::fmt;
@@ -141,7 +139,8 @@ pub enum MoveStatus {
     Ok,
     Illegal,
     InCheck,
-    CastleBlocked
+    CastleBlocked,
+    NoPromotionNominated
 }
 
 impl MoveStatus {
@@ -149,8 +148,9 @@ impl MoveStatus {
         match self {
             MoveStatus::Ok => "Ok",
             MoveStatus::Illegal => "Illegal",
-            MoveStatus::InCheck => "InCheck",
-            MoveStatus::CastleBlocked => "CastleBlocked"
+            MoveStatus::InCheck => "In Check",
+            MoveStatus::CastleBlocked => "Castle Blocked",
+            MoveStatus::NoPromotionNominated => "No Promotion Nominated"
         }
     }
 }
@@ -160,6 +160,33 @@ impl fmt::Display for MoveStatus {
         return write!(f, "{}", self.what());
     }
 }
+
+pub enum BoardStatus {
+    InPlay,
+    Check,
+    Checkmate,
+    Stalemate,
+    Invalid
+}
+
+impl BoardStatus {
+    pub fn what(&self) -> &str {
+        match self {
+            BoardStatus::InPlay => "In Play",
+            BoardStatus::Check => "Check",
+            BoardStatus::Checkmate => "Checkmate",
+            BoardStatus::Stalemate => "Stalemate",
+            BoardStatus::Invalid => "Invalid"
+        }
+    }
+}
+
+impl fmt::Display for BoardStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        return write!(f, "{}", self.what());
+    }
+}
+
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Board {
@@ -373,7 +400,75 @@ impl Board {
         }
     }
 
-    // returns all legal squares for a given piece, and whether or not this piece is giving check
+    // Calculates pieces that are giving check to the given color
+    pub fn checking_pieces(&self,color: Color) -> Vec<(usize,usize)> {
+        let mut file: i8 = 0;
+        let mut rank: i8 = 0;
+        let mut found: bool = false;
+        // Search for the king
+        'search: for rindex in 0..8 {
+            for findex in 0..8 {
+                if let Some(piece) = self.get((findex,rindex)) {
+                    if piece.kind == PieceType::King && piece.color == color {
+                        file = findex as i8;
+                        rank = rindex as i8;
+                        found = true;
+                        break 'search;
+                    }
+                }
+            }
+        }
+        // No king found, therefore no pieces can be giving check. New chess strategy dropped?
+        if !found { return Vec::new(); }
+        // Project rays out to find attackers
+        let mut attackers: Vec<(usize,usize)> = Vec::new();
+        for (df,dr) in [(1,0),(0,1),(1,1),(-1,0),(0,-1),(-1,-1),(-1,1),(1,-1)] {
+            let mut f = file;
+            let mut r = rank;
+            let mut distance = 0;
+            loop {
+                f += df;
+                r += dr;
+                distance += 1;
+                if f < 0 || f >= 8 || r < 0 || r >= 8 { break; }
+                if let Some(piece) = self.get((f as usize, r as usize)) {
+                    if piece.color == color.opposite() {
+                        let is_diagonal = df != 0 && dr != 0;
+                        let attacks = match piece.kind {
+                            PieceType::Queen => true,
+                            PieceType::Rook => !is_diagonal,
+                            PieceType::Bishop => is_diagonal,
+                            PieceType::Pawn => {
+                                // pawns only attack one square diagonally, forward relative to their own color
+                                distance == 1 && is_diagonal &&
+                                ((piece.color == Color::White && dr == -1) || (piece.color == Color::Black && dr == 1))
+                            }
+                            PieceType::King => distance == 1, // adjacent king "attacks" for check-detection purposes
+                            _ => false,
+                        };
+                        if attacks { attackers.push((f as usize, r as usize)); }
+                    }
+                    break;
+                }
+            }
+        }
+        // Check for knights
+        for (df,dr) in [(2, 1),(2,-1),(-2,1),(-2,-1),(1,2),(1,-2),(-1,2),(-1,-2)] {
+            let f = file + df;
+            let r = rank + dr;
+            if f < 0 || f >= 8 || r < 0 || r >= 8 {
+                continue;
+            }
+            if let Some(piece) = self.get((f as usize,r as usize)) {
+                if piece.color == color.opposite() && piece.kind == PieceType::Knight {
+                    attackers.push((f as usize, r as usize));
+                }
+            }
+        }
+        attackers
+    }
+
+    // returns all legal squares for a given piece (ignoring checks), and whether or not this piece is giving check
     fn get_piece_squares(&self,(file, rank): (usize, usize)) -> (Option<Vec<(usize,usize)>>, bool) {
         let piece_opt = self.get((file, rank));
         if piece_opt.is_none() { 
@@ -484,16 +579,41 @@ impl Board {
         BoardAnal::new(white_pieces,black_pieces,white_checking,black_checking)
     }
 
-    fn apply_transform_impl(&mut self, from: (usize,usize), to: (usize,usize), piece: Option<Piece>) -> bool {
+    pub fn legal_moves(&self, anal: &BoardAnal) -> Vec<ChessMove> {
+        let mut legal_moves: Vec<ChessMove> = Vec::new();
+        for (pos,move_list) in anal.pieces(self.to_move).iter() {
+            let piece_opt = self.get(*pos);
+            if piece_opt.is_none() {
+                continue;
+            }
+            let piece = piece_opt.unwrap();
+            for end_pos in move_list {
+                if piece.kind == PieceType::Pawn && (end_pos.1 == match piece.color {
+                    Color::White => 7,
+                    Color::Black => 0
+                }) {
+                    for piece_type in [PieceType::Knight, PieceType::Bishop, PieceType::Rook, PieceType::Queen] {
+                        let chess_move = ChessMove::new(*pos,*end_pos,Some(piece_type));
+                        if self.move_status(chess_move, &anal, piece).is_ok_and(|x| x == MoveStatus::Ok) {
+                            legal_moves.push(chess_move);
+                        }
+                    } 
+                } else {
+                    let chess_move = ChessMove::new(*pos,*end_pos,None);
+                    if self.move_status(chess_move, &anal, piece).is_ok_and(|x| x == MoveStatus::Ok) {
+                        legal_moves.push(chess_move);
+                    }
+                }
+            }
+        }
+        return legal_moves;
+    }
+
+    fn apply_transform(&mut self, from: (usize,usize), to: (usize,usize), piece: Option<Piece>) -> bool {
         let capture = self.get(to).is_some();
         self.squares[to.1][to.0] = piece;
         self.squares[from.1][from.0] = None;
         capture
-    }
-
-    // Applies a transform to a piece on the board. Returns if a piece was captured. For internal use only
-    fn apply_transform(&mut self, from: (usize,usize), to: (usize,usize)) -> bool {
-        self.apply_transform_impl(from, to, self.get(from))
     }
 
     fn apply_move(&mut self, chess_move: ChessMove) -> bool {
@@ -513,7 +633,7 @@ impl Board {
             (0,7) => { self.castle_rights.3 = false; }, // revoke black queenside castling
             _ => {}
         }
-        self.apply_transform_impl(
+        self.apply_transform(
             chess_move.from, 
             chess_move.to, 
             if let Some(ptype) = chess_move.promotion {
@@ -536,8 +656,7 @@ impl Board {
         self.en_passant_target = en_passant_target;
     }
 
-    // TODO: Add check logic. This is the main 
-    pub fn try_move(&mut self, chess_move: ChessMove) -> Result<MoveStatus, String> {
+    pub fn move_validate(&self, chess_move: ChessMove) -> Result<(),String> {
         let (from_file, from_rank) = chess_move.from;
         let (to_file, to_rank) = chess_move.to;
 
@@ -554,41 +673,72 @@ impl Board {
         if piece.color != self.to_move {
             return Err("It's not this piece's turn to move".into());
         }
+        return Ok(());
+    }
 
-        let anal = self.anal();
+    pub fn move_status(&self, chess_move: ChessMove, anal: &BoardAnal, piece: Piece) -> Result<MoveStatus, String> {
+
         // check if we are in check now
         let valid_squares = anal.pieces(self.to_move).get(&chess_move.from).unwrap(); // This should be guaranteed as we already checked that there is a piece on the square
 
         if !valid_squares.contains(&chess_move.to) {
-            return Ok(MoveStatus::Illegal)
+            return Ok(MoveStatus::Illegal);
         }
 
         let fwd = self.lookahead(chess_move,true)?;
-        let fwdanal = fwd.anal();
-        if fwdanal.in_check(self.to_move) {
+        if fwd.checking_pieces(self.to_move).len() > 0 {
             return Ok(MoveStatus::InCheck);
         }
+        // Castling logic because castling is a special boy that needs its own logic
+        if chess_move.delta().0.abs() == 2 && piece.kind == PieceType::King {
+            if anal.in_check(self.to_move) {
+                return Ok(MoveStatus::InCheck);
+            }
+            let delta = chess_move.delta();
+            let final_attackers = anal.attackers(chess_move.to,self.to_move.opposite());
+            let transit_attackers = anal.attackers(((chess_move.to.0 as i8 + (1 * (delta.0 / 2))) as usize,chess_move.to.1),self.to_move.opposite());
+            if final_attackers.len() > 0 || transit_attackers.len() > 0 {
+                return Ok(MoveStatus::CastleBlocked)
+            }
+        }
+        // Promotion logic
+        // Behold the boolean statement of doom and despair
+        if piece.kind == PieceType::Pawn && (chess_move.to.1 == match piece.color {
+            Color::White => 7,
+            Color::Black => 0
+        }) && chess_move.promotion.is_none() {
+            return Ok(MoveStatus::NoPromotionNominated);
+        }
         
+        return Ok(MoveStatus::Ok);
+    }
 
-        // special cases
+
+    pub fn try_move(&mut self, anal: &BoardAnal, chess_move: ChessMove) -> Result<MoveStatus, String> {
+        self.move_validate(chess_move)?;
+
+        // duplication ew
+        let piece_option = self.get(chess_move.from);
+        if piece_option.is_none() {
+            return Err("No piece at the source square".into());
+        }
+        let piece = piece_option.unwrap();
+        let status = self.move_status(chess_move,anal,piece)?;
+        if status != MoveStatus::Ok {
+            return Ok(status)
+        }
+
         match piece.kind {
             PieceType::King => {
+                let delta = chess_move.delta();
                 // Check if move is castle
-                if chess_move.delta().0.abs() == 2 {
-                    if anal.in_check(self.to_move) {
-                        return Ok(MoveStatus::InCheck);
-                    }
-                    let delta = chess_move.delta();
-                    let final_attackers = anal.attackers(chess_move.to,self.to_move.opposite());
-                    let transit_attackers = anal.attackers(((to_file as i8 + (1 * (delta.0 / 2))) as usize,to_rank),self.to_move.opposite());
-                    if final_attackers.len() > 0 || transit_attackers.len() > 0 {
-                        return Ok(MoveStatus::CastleBlocked)
-                    }
+                if delta.0.abs() == 2 {
+                    // TODO: move this into a variable so it isn't uselessly recalcula
                     match delta.0 {
                         // kingside
                         2 => {
                             self.apply_move(chess_move);
-                            self.apply_transform((chess_move.from.0 + 3, chess_move.from.1),(chess_move.to.0 - 1, chess_move.to.1));
+                            self.apply_transform((chess_move.from.0 + 3, chess_move.from.1),(chess_move.to.0 - 1, chess_move.to.1), self.get(chess_move.from));
                             match self.to_move {
                                 Color::White => { self.castle_rights.0 = false; self.castle_rights.1 = false}
                                 Color::Black => { self.castle_rights.2 = false; self.castle_rights.3 = false}
@@ -599,7 +749,7 @@ impl Board {
                         // queenside
                         -2 => {
                             self.apply_move(chess_move);
-                            self.apply_transform((chess_move.from.0 - 4, chess_move.from.1),(chess_move.to.0 + 1, chess_move.to.1));
+                            self.apply_transform((chess_move.from.0 - 4, chess_move.from.1),(chess_move.to.0 + 1, chess_move.to.1), self.get(chess_move.from));
                             match self.to_move {
                                 Color::White => { self.castle_rights.0 = false; self.castle_rights.1 = false}
                                 Color::Black => { self.castle_rights.2 = false; self.castle_rights.3 = false}

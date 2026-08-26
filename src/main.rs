@@ -3,6 +3,7 @@
 // the license found in the root directory of this project
 
 mod game;
+mod engine;
 
 use game::{Board, ChessMove};
 fn main() {
