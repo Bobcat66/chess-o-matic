@@ -134,8 +134,13 @@ impl BoardAnal {
         move_status(&self.board, &self.raw, chess_move)
     }
 
-    pub fn board_status(&self) -> Result<(),BoardStatus> {
-        if 
+    pub fn board_status(&self) -> BoardStatus {
+        let check = self.board.checking_pieces(self.board.to_move).len() > 0;
+        let mate = self.legal_moves.len() == 0;
+        if check && mate { return BoardStatus::Checkmate; }
+        if check && !mate { return BoardStatus::Check; }
+        if !check && mate { return BoardStatus::Stalemate; }
+        return BoardStatus::Ok
     }
 
     pub fn captures(&self, color: Color) -> Vec<ChessMove> {
@@ -205,19 +210,19 @@ impl fmt::Display for MoveStatus {
 }
 
 pub enum BoardStatus {
+    Ok,
     Check,
     Checkmate,
-    Stalemate,
-    Invalid
+    Stalemate
 }
 
 impl BoardStatus {
     pub fn what(&self) -> &str {
         match self {
+            BoardStatus::Ok => "Ok",
             BoardStatus::Check => "Check",
             BoardStatus::Checkmate => "Checkmate",
-            BoardStatus::Stalemate => "Stalemate",
-            BoardStatus::Invalid => "Invalid"
+            BoardStatus::Stalemate => "Stalemate"
         }
     }
 }
@@ -248,16 +253,16 @@ impl ZobristKeys {
         for color in 0..2 {
             for piece in 0..6 {
                 for sq in 0..64 {
-                    piece_square[color][piece][sq] = rng.gen();
+                    piece_square[color][piece][sq] = rng.next_u64();
                 }
             }
         }
         
         ZobristKeys {
             piece_square,
-            black_to_move: rng.gen(),
-            castle_rights: [rng.gen(), rng.gen(), rng.gen(), rng.gen()],
-            en_passant_file: std::array::from_fn(|_| rng.gen()),
+            black_to_move: rng.next_u64(),
+            castle_rights: [rng.next_u64(), rng.next_u64(), rng.next_u64(), rng.next_u64()],
+            en_passant_file: std::array::from_fn(|_| rng.next_u64()),
         }
     }
 }
@@ -336,6 +341,7 @@ fn move_status(board: &Board, anal: &RawAnal, chess_move: ChessMove) -> Result<(
     return Ok(());
 }
 
+// legal moves for the color to move
 fn legal_moves(board: &Board, anal: &RawAnal) -> Vec<ChessMove> {
     let mut legal_moves: Vec<ChessMove> = Vec::new();
     for (pos,move_list) in raw_pieces(anal,board.to_move).iter() {

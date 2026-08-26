@@ -9,7 +9,7 @@ use game::{Board, ChessMove};
 fn main() {
     let mut board = Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").unwrap();
 
-    // Fried Liver Attack
+    println!("Fried Liver Attack");
     board.try_move(&(board.anal()),ChessMove::from_uci("e2e4").unwrap()).unwrap();
     board.try_move(&(board.anal()),ChessMove::from_uci("e7e5").unwrap()).unwrap();
     println!("1. e4 e5\n");
@@ -45,6 +45,11 @@ fn main() {
     println!("7. Qf3+ Ke6\n");
     println!("{}", board.render_ascii());
 
-    // 
+    let mut evergreen_board = Board::from_fen("r1bqk1nr/pppp1ppp/2n5/b7/2BpP3/2P2N2/P4PPP/RNBQK2R w KQkq - 0 7").unwrap();
+    println!("The Evergreen Game, Adolf Anderssen versus Jean Dufresne, 1852 (Move 7)");
+    println!("{}", evergreen_board.render_ascii());
+    // Castling smoketest
+    evergreen_board.try_move(&(evergreen_board.anal()),ChessMove::from_uci("e1g1").unwrap()).unwrap();
+    println!("{}", evergreen_board.render_ascii());
     
 }
