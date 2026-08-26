@@ -3,7 +3,7 @@
 // the license found in the root directory of this project
 
 use crate::game::PieceType::Pawn;
-use crate::game::board::MoveStatus::Illegal;
+use crate::game::board::MoveStatus::{Illegal, InCheck};
 use crate::game::{Color, Movable, Piece, PieceType, move_flags};
 use regex::Regex;
 use std::fmt;
@@ -140,9 +140,25 @@ impl BoardAnal {
 pub enum MoveStatus {
     Ok,
     Illegal,
-    Check,
-    Checkmate,
-    Stalemate
+    InCheck,
+    CastleBlocked
+}
+
+impl MoveStatus {
+    pub fn what(&self) -> &str {
+        match self {
+            MoveStatus::Ok => "Ok",
+            MoveStatus::Illegal => "Illegal",
+            MoveStatus::InCheck => "InCheck",
+            MoveStatus::CastleBlocked => "CastleBlocked"
+        }
+    }
+}
+
+impl fmt::Display for MoveStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        return write!(f, "{}", self.what());
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -334,7 +350,14 @@ impl Board {
         if let Some(piece) = fwd.get(chess_move.from) {
             if update_metadata {
                 let reset_halfmove = piece.kind == PieceType::Pawn || fwd.get(chess_move.to).is_some();
-                fwd.update_metadata(reset_halfmove);
+                if piece.kind == PieceType::Pawn && chess_move.delta().1.abs() == 2 {
+                    fwd.update_metadata(reset_halfmove,Some((chess_move.to.0,(chess_move.to.1 as i8 + match self.to_move {
+                            Color::White => -1,
+                            Color::Black => 1
+                        }) as usize)));
+                } else {
+                    fwd.update_metadata(reset_halfmove,None);
+                }
             }
             fwd.edit_board(chess_move.from,None);
             fwd.edit_board(
@@ -447,7 +470,7 @@ impl Board {
                         match piece.color {
                             Color::White => { &mut white_pieces },
                             Color::Black => { &mut black_pieces }
-                        }.insert((rindex,findex), piece_squares);
+                        }.insert((findex,rindex), piece_squares);
                     }
                     if piece_square_result.1 {
                         match piece.color {
@@ -461,16 +484,48 @@ impl Board {
         BoardAnal::new(white_pieces,black_pieces,white_checking,black_checking)
     }
 
-    // Applies a transform to a piece on the board. Returns if a piece was captured For internal use only
-    fn apply_transform(&mut self, from: (usize,usize), to: (usize,usize)) -> bool {
+    fn apply_transform_impl(&mut self, from: (usize,usize), to: (usize,usize), piece: Option<Piece>) -> bool {
         let capture = self.get(to).is_some();
-        self.squares[to.1][to.0] = self.get(from);
+        self.squares[to.1][to.0] = piece;
         self.squares[from.1][from.0] = None;
         capture
     }
 
+    // Applies a transform to a piece on the board. Returns if a piece was captured. For internal use only
+    fn apply_transform(&mut self, from: (usize,usize), to: (usize,usize)) -> bool {
+        self.apply_transform_impl(from, to, self.get(from))
+    }
+
+    fn apply_move(&mut self, chess_move: ChessMove) -> bool {
+        // Verifies castling rights
+        // yes it checks every move shut up
+        match chess_move.from {
+            (7,0) => { self.castle_rights.0 = false; }, // revoke white kingside castling
+            (0,0) => { self.castle_rights.1 = false; }, // revoke white queenside castling
+            (7,7) => { self.castle_rights.2 = false; }, // revoke black kingside castling
+            (0,7) => { self.castle_rights.3 = false; }, // revoke black queenside castling
+            _ => {}
+        }
+        match chess_move.to {
+            (7,0) => { self.castle_rights.0 = false; }, // revoke white kingside castling
+            (0,0) => { self.castle_rights.1 = false; }, // revoke white queenside castling
+            (7,7) => { self.castle_rights.2 = false; }, // revoke black kingside castling
+            (0,7) => { self.castle_rights.3 = false; }, // revoke black queenside castling
+            _ => {}
+        }
+        self.apply_transform_impl(
+            chess_move.from, 
+            chess_move.to, 
+            if let Some(ptype) = chess_move.promotion {
+                Some(Piece::new(self.to_move,ptype))
+            } else {
+                self.get(chess_move.from)
+            }
+        )
+    }
+
     // updates metadata for a move (updates halfmove clock, move number, and side to move)
-    pub fn update_metadata(&mut self, reset_halfmove: bool) {
+    pub fn update_metadata(&mut self, reset_halfmove: bool, en_passant_target: Option<(usize, usize)>) {
         if reset_halfmove {
             self.halfmove_clock = 0;
         } else {
@@ -478,6 +533,7 @@ impl Board {
         }
         if self.to_move == Color::Black { self.fullmove_number += 1 }
         self.to_move = self.to_move.opposite();
+        self.en_passant_target = en_passant_target;
     }
 
     // TODO: Add check logic. This is the main 
@@ -501,7 +557,6 @@ impl Board {
 
         let anal = self.anal();
         // check if we are in check now
-        
         let valid_squares = anal.pieces(self.to_move).get(&chess_move.from).unwrap(); // This should be guaranteed as we already checked that there is a piece on the square
 
         if !valid_squares.contains(&chess_move.to) {
@@ -511,7 +566,7 @@ impl Board {
         let fwd = self.lookahead(chess_move,true)?;
         let fwdanal = fwd.anal();
         if fwdanal.in_check(self.to_move) {
-            return Ok(MoveStatus::Illegal);
+            return Ok(MoveStatus::InCheck);
         }
         
 
@@ -520,31 +575,36 @@ impl Board {
             PieceType::King => {
                 // Check if move is castle
                 if chess_move.delta().0.abs() == 2 {
+                    if anal.in_check(self.to_move) {
+                        return Ok(MoveStatus::InCheck);
+                    }
                     let delta = chess_move.delta();
                     let final_attackers = anal.attackers(chess_move.to,self.to_move.opposite());
                     let transit_attackers = anal.attackers(((to_file as i8 + (1 * (delta.0 / 2))) as usize,to_rank),self.to_move.opposite());
                     if final_attackers.len() > 0 || transit_attackers.len() > 0 {
-                        return Ok(MoveStatus::Illegal)
+                        return Ok(MoveStatus::CastleBlocked)
                     }
                     match delta.0 {
                         // kingside
                         2 => {
-                            self.apply_transform(chess_move.from,chess_move.to);
+                            self.apply_move(chess_move);
                             self.apply_transform((chess_move.from.0 + 3, chess_move.from.1),(chess_move.to.0 - 1, chess_move.to.1));
                             match self.to_move {
-                                Color::White => { self.castle_rights.0 = false; }
-                                Color::Black => { self.castle_rights.2 = false; }
+                                Color::White => { self.castle_rights.0 = false; self.castle_rights.1 = false}
+                                Color::Black => { self.castle_rights.2 = false; self.castle_rights.3 = false}
                             }
+                            self.update_metadata(false, None);
                             return Ok(MoveStatus::Ok);
                         },
                         // queenside
                         -2 => {
-                            self.apply_transform(chess_move.from,chess_move.to);
+                            self.apply_move(chess_move);
                             self.apply_transform((chess_move.from.0 - 4, chess_move.from.1),(chess_move.to.0 + 1, chess_move.to.1));
                             match self.to_move {
-                                Color::White => { self.castle_rights.1 = false; }
-                                Color::Black => { self.castle_rights.3 = false; }
+                                Color::White => { self.castle_rights.0 = false; self.castle_rights.1 = false}
+                                Color::Black => { self.castle_rights.2 = false; self.castle_rights.3 = false}
                             }
+                            self.update_metadata(false, None);
                             return Ok(MoveStatus::Ok);
                         }
                         _ => {
@@ -553,25 +613,52 @@ impl Board {
                     }
                 }
                 // normal case
-                self.apply_transform(chess_move.from, chess_move.to);
+                let captured = self.apply_move(chess_move);
+                // revoke castling rights
+                match self.to_move {
+                    Color::White => { self.castle_rights.0 = false; self.castle_rights.1 = false}
+                    Color::Black => { self.castle_rights.2 = false; self.castle_rights.3 = false}
+                }
+                self.update_metadata(captured, None);
+                return Ok(MoveStatus::Ok)
             },
             PieceType::Pawn => {
                 // En passant
                 if let Some(target) = self.en_passant_target {
                     if chess_move.to.eq(&target) {
-
+                        self.edit_board((target.0,(target.1 as i8 + match self.to_move {
+                            Color::White => -1,
+                            Color::Black => 1
+                        }) as usize), None);
+                        self.apply_move(chess_move);
+                        self.update_metadata(true, None);
+                        return Ok(MoveStatus::Ok);
                     }
                 }
+                // Normal case
+                self.apply_move(chess_move);
+                // handle en passant
+                if chess_move.delta().1.abs() == 2 {
+                    self.update_metadata(true,Some((chess_move.to.0,(chess_move.to.1 as i8 + match self.to_move {
+                            Color::White => -1,
+                            Color::Black => 1
+                        }) as usize)));
+                } else {
+                    self.update_metadata(true,None);
+                }
+                return Ok(MoveStatus::Ok);
             }, 
+            PieceType::Rook => {
+                let captured = self.apply_move(chess_move);
+                self.update_metadata(captured, None);
+                return Ok(MoveStatus::Ok);
+            }
             _ => {
+                let captured = self.apply_move(chess_move);
+                self.update_metadata(captured, None);
+                return Ok(MoveStatus::Ok);
             }
         }
-
-        // Normal case
-        // Ensure move doesn't put king in check 
-        self.apply_transform(chess_move.from, chess_move.to);
-
-        Ok(MoveStatus::Ok)
     }
 }
 
