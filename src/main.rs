@@ -7,6 +7,7 @@ mod engine;
 
 use game::{Board, ChessMove};
 fn main() {
+    // TODO: Move this into an actual test suite
     let mut board = Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").unwrap();
 
     println!("Fried Liver Attack");

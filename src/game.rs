@@ -5,5 +5,5 @@
 mod board;
 mod piece;
 
-pub use board::{Board,ChessMove,BoardAnal,Square,RawMove,ZobristKeys};
+pub use board::{Board,ChessMove,BoardAnal,BoardStatus,Square,RawMove,ZobristKeys};
 pub use piece::{Piece, Color, PieceType, Movable, move_flags, move_patterns};

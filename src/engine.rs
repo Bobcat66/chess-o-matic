@@ -8,6 +8,6 @@ use crate::game::{Board, BoardAnal ,Color};
 mod search;
 // Evaluator trait
 pub trait Evaluator {
-    fn eval(board: &Board, anal: &BoardAnal) -> i32;
+    fn eval(anal: &BoardAnal) -> i32;
 }
 

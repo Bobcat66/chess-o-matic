@@ -109,9 +109,9 @@ fn raw_pieces(raw: &RawAnal, color: Color) -> &HashMap<Square,Vec<Square>> {
 
 // board analysis
 pub struct BoardAnal {
-    raw: RawAnal,
-    legal_moves: Vec<ChessMove>, // legal moves
-    board: Board
+    pub raw: RawAnal,
+    pub legal_moves: Vec<ChessMove>, // legal moves
+    pub board: Board
 }
 
 impl BoardAnal {
@@ -141,6 +141,11 @@ impl BoardAnal {
         if check && !mate { return BoardStatus::Check; }
         if !check && mate { return BoardStatus::Stalemate; }
         return BoardStatus::Ok
+    }
+
+    pub fn lookahead(&self, chess_move: ChessMove) -> Result<BoardAnal,MoveStatus> {
+        let board = self.board.lookahead(chess_move)?;
+        return Ok(board.anal());
     }
 
     pub fn captures(&self, color: Color) -> Vec<ChessMove> {
@@ -209,6 +214,7 @@ impl fmt::Display for MoveStatus {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BoardStatus {
     Ok,
     Check,
@@ -223,6 +229,14 @@ impl BoardStatus {
             BoardStatus::Check => "Check",
             BoardStatus::Checkmate => "Checkmate",
             BoardStatus::Stalemate => "Stalemate"
+        }
+    }
+    pub fn terminal(&self) -> bool {
+        match self {
+            BoardStatus::Ok => false,
+            BoardStatus::Check => false,
+            BoardStatus::Checkmate => true,
+            BoardStatus::Stalemate => true
         }
     }
 }
