@@ -3,11 +3,11 @@
 // the license found in the root directory of this project
 
 
-use crate::game::{Board,Color};
+use crate::game::{Board, BoardAnal ,Color};
 
 mod search;
 // Evaluator trait
 pub trait Evaluator {
-    fn eval(board: &Board) -> i32;
+    fn eval(board: &Board, anal: &BoardAnal) -> i32;
 }
 

@@ -5,17 +5,21 @@
 use crate::game::{Color, Movable, Piece, PieceType, move_flags};
 use regex::Regex;
 use std::fmt;
-use std::collections::HashMap;
+use std::collections::{HashMap,HashSet};
+
+// file, rank
+pub type Square = (usize,usize);
+pub type RawMove = (Square,Square); // Todo, switch apply_transform to this???
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChessMove {
-    pub from: (usize, usize),
-    pub to: (usize, usize),
+    pub from: Square,
+    pub to: Square,
     pub promotion: Option<PieceType>
 }
 
 impl ChessMove {
-    pub fn new(from: (usize, usize), to: (usize, usize), promotion: Option<PieceType>) -> ChessMove {
+    pub fn new(from: Square, to: Square, promotion: Option<PieceType>) -> ChessMove {
         ChessMove {
             from,
             to,
@@ -93,42 +97,84 @@ impl fmt::Display for ChessMove {
 
 // board analysis
 pub struct BoardAnal {
-    white_pieces: HashMap<(usize,usize),Vec<(usize,usize)>>, // hashmap of white pieces and their legal squares
-    black_pieces: HashMap<(usize,usize),Vec<(usize,usize)>>, // hashmap of white pieces and their legal squares
+    white_pieces: HashMap<Square,Vec<Square>>, // hashmap of white pieces and their legal squares
+    black_pieces: HashMap<Square,Vec<Square>>, // hashmap of white pieces and their legal squares
+    board: Board
 }
 
 impl BoardAnal {
-    pub fn new(white_pieces: HashMap<(usize,usize),Vec<(usize,usize)>>, black_pieces: HashMap<(usize,usize),Vec<(usize,usize)>>) -> BoardAnal {
+    pub fn new(white_pieces: HashMap<Square,Vec<Square>>, black_pieces: HashMap<Square,Vec<Square>>, board: Board) -> BoardAnal {
         BoardAnal {
             white_pieces: white_pieces,
             black_pieces: black_pieces,
+            board: board
         }
     }
 
-    pub fn pieces(&self, color: Color) -> &HashMap<(usize,usize),Vec<(usize,usize)>> {
+    pub fn pieces(&self, color: Color) -> &HashMap<Square,Vec<Square>> {
         match color {
             Color::White => &self.white_pieces,
             Color::Black => &self.black_pieces
         }
     }
+
+
+    pub fn captures(&self, color: Color) -> Vec<ChessMove> {
+        let mut captures: Vec<ChessMove> = Vec::new();
+        let mut enemy_positions: HashSet<Square> = self.pieces(color.opposite()).keys().copied().collect();
+        if let Some(square) = self.board.en_passant_target {
+            enemy_positions.insert(square);
+        }
+        for (start_square,move_list) in self.pieces(color).iter() {
+            let move_set: HashSet<Square> = move_list.into_iter().copied().collect();
+            for capture_square in move_set.intersection(&enemy_positions) {
+                if let Some(piece) = self.board.get(*start_square) {
+                    if piece.kind == PieceType::Pawn && (capture_square.1 == match piece.color {
+                        Color::White => 7,
+                        Color::Black => 0
+                    }) {
+                        // check legality 
+                        if self.board.is_legal(self, ChessMove::new(*start_square,*capture_square,Some(PieceType::Queen))).is_ok() {
+                            captures.push(ChessMove::new(*start_square,*capture_square,Some(PieceType::Queen)));
+                            captures.push(ChessMove::new(*start_square,*capture_square,Some(PieceType::Rook)));
+                            captures.push(ChessMove::new(*start_square,*capture_square,Some(PieceType::Bishop)));
+                            captures.push(ChessMove::new(*start_square,*capture_square,Some(PieceType::Knight)));
+                        }
+                    } else {
+                        let mv = ChessMove::new(*start_square,*capture_square,None);
+                        if self.board.is_legal(self, mv).is_ok() {
+                            captures.push(ChessMove::new(*start_square,*capture_square,None));
+                        }
+                    }
+                }
+            }
+        }
+        captures
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MoveStatus {
-    Ok,
     Illegal,
-    InCheck,
-    CastleBlocked,
-    NoPromotionNominated
+    IllegalInCheck,
+    IllegalCastleBlocked,
+    IllegalNoPromotionNominated,
+    Invalid,
+    InvalidEmptySquare,
+    InvalidWrongTurn,
+    InvalidOutOfBounds
 }
 
 impl MoveStatus {
     pub fn what(&self) -> &str {
         match self {
-            MoveStatus::Ok => "Ok",
             MoveStatus::Illegal => "Illegal",
-            MoveStatus::InCheck => "In Check",
-            MoveStatus::CastleBlocked => "Castle Blocked",
-            MoveStatus::NoPromotionNominated => "No Promotion Nominated"
+            MoveStatus::IllegalInCheck => "Illegal: In Check",
+            MoveStatus::IllegalCastleBlocked => "Illegal: Castle Blocked",
+            MoveStatus::IllegalNoPromotionNominated => "Illegal: No Promotion Nominated",
+            MoveStatus::Invalid => "Invalid",
+            MoveStatus::InvalidEmptySquare => "Invalid: Attempted to move from empty square",
+            MoveStatus::InvalidWrongTurn => "Invalid: Not this piece's turn",
+            MoveStatus::InvalidOutOfBounds => "Invalid: Attempted to move out of bounds"
         }
     }
 }
@@ -170,14 +216,14 @@ impl fmt::Display for BoardStatus {
 pub struct Board {
     pub squares: [[Option<Piece>; 8]; 8],
     pub to_move: Color,
-    pub en_passant_target: Option<(usize, usize)>,
+    pub en_passant_target: Option<Square>,
     pub castle_rights: (bool, bool, bool, bool), // (white_kingside, white_queenside, black_kingside, black_queenside)
     pub halfmove_clock: u32,
     pub fullmove_number: u32,
 }
 
 impl Board {
-    pub fn new(squares: [[Option<Piece>; 8]; 8], to_move: Color, en_passant_target: Option<(usize, usize)>, castle_rights: (bool, bool, bool, bool), halfmove_clock: u32, fullmove_number: u32) -> Board {
+    pub fn new(squares: [[Option<Piece>; 8]; 8], to_move: Color, en_passant_target: Option<Square>, castle_rights: (bool, bool, bool, bool), halfmove_clock: u32, fullmove_number: u32) -> Board {
         Board {
             squares: squares,
             to_move: to_move,
@@ -338,32 +384,32 @@ impl Board {
         fen
     }
 
-    pub fn get(&self, (file, rank): (usize, usize)) -> Option<Piece> {
+    pub fn get(&self, (file, rank): Square) -> Option<Piece> {
         if file >= 8 || rank >= 8 {
             return None;
         }
         self.squares[rank][file]
     }
 
-    pub fn edit_board(&mut self, square: (usize,usize), piece: Option<Piece>) {
+    pub fn edit_board(&mut self, square: Square, piece: Option<Piece>) {
         self.squares[square.1][square.0] = piece;
     }
 
     // Copies the board and applies a move to the copy, then returns the copy, allows "looking ahead" without editing the board itself. 
-    pub fn lookahead(&self, chess_move: ChessMove) -> Result<Board,String> {
+    pub fn lookahead(&self, chess_move: ChessMove) -> Result<Board,MoveStatus> {
         let mut fwd = self.clone();
         if fwd.get(chess_move.from).is_some() {
             fwd.apply_move(chess_move)?;
             Ok(fwd)
         } else {
-            Err("No piece at from square".into())
+            Err(MoveStatus::InvalidEmptySquare)
         }
     }
 
     // calculates pieces of a given color attacking a given square
-    pub fn attacking_pieces(&self,(file,rank): (usize,usize), color: Color) -> Vec<(usize,usize)> {
+    pub fn attacking_pieces(&self,(file,rank): Square, color: Color) -> Vec<Square> {
         // Project rays out to find attackers
-        let mut attackers: Vec<(usize,usize)> = Vec::new();
+        let mut attackers: Vec<Square> = Vec::new();
         for (df,dr) in [(1,0),(0,1),(1,1),(-1,0),(0,-1),(-1,-1),(-1,1),(1,-1)] {
             let mut f = file as i8;
             let mut r = rank as i8;
@@ -411,7 +457,7 @@ impl Board {
     }
 
     // Calculates pieces that are giving check to the given color
-    pub fn checking_pieces(&self,color: Color) -> Vec<(usize,usize)> {
+    pub fn checking_pieces(&self,color: Color) -> Vec<Square> {
         let mut file: usize = 0;
         let mut rank: usize = 0;
         let mut found: bool = false;
@@ -434,14 +480,14 @@ impl Board {
     }
 
     // returns all legal squares for a given piece (ignoring checks), and whether or not this piece is giving check
-    fn get_piece_squares(&self,(file, rank): (usize, usize)) -> Option<Vec<(usize,usize)>> {
+    fn get_piece_squares(&self,(file, rank): Square) -> Option<Vec<Square>> {
         let piece_opt = self.get((file, rank));
         if piece_opt.is_none() { 
             return None;
         }
         let piece = piece_opt.unwrap();
         let pattern = piece.kind.move_pattern();
-        let mut squares: Vec<(usize,usize)> = Vec::new();
+        let mut squares: Vec<Square> = Vec::new();
         for &(df, dr, flags) in pattern {
             let mut f = file as i8;
             let mut r = rank as i8;
@@ -514,8 +560,8 @@ impl Board {
 
     // short for "analysis"
     pub fn anal(&self) -> BoardAnal {
-        let mut white_pieces: HashMap<(usize,usize),Vec<(usize,usize)>> = HashMap::new();
-        let mut black_pieces: HashMap<(usize,usize),Vec<(usize,usize)>> = HashMap::new();
+        let mut white_pieces: HashMap<Square,Vec<Square>> = HashMap::new();
+        let mut black_pieces: HashMap<Square,Vec<Square>> = HashMap::new();
         for (rindex, rank) in self.squares.iter().enumerate() {
             for (findex, piece_opt) in rank.iter().enumerate() {
                 if let Some(piece) = piece_opt {
@@ -529,7 +575,7 @@ impl Board {
                 }
             }
         }
-        BoardAnal::new(white_pieces,black_pieces)
+        BoardAnal::new(white_pieces,black_pieces,self.clone())
     }
 
     pub fn legal_moves(&self, anal: &BoardAnal) -> Vec<ChessMove> {
@@ -547,13 +593,13 @@ impl Board {
                 }) {
                     for piece_type in [PieceType::Knight, PieceType::Bishop, PieceType::Rook, PieceType::Queen] {
                         let chess_move = ChessMove::new(*pos,*end_pos,Some(piece_type));
-                        if self.move_status(anal, chess_move, piece).is_ok_and(|x| x == MoveStatus::Ok) {
+                        if self.move_status(anal, chess_move, piece).is_ok() {
                             legal_moves.push(chess_move);
                         }
                     } 
                 } else {
                     let chess_move = ChessMove::new(*pos,*end_pos,None);
-                    if self.move_status(anal, chess_move, piece).is_ok_and(|x| x == MoveStatus::Ok) {
+                    if self.move_status(anal, chess_move, piece).is_ok() {
                         legal_moves.push(chess_move);
                     }
                 }
@@ -562,14 +608,14 @@ impl Board {
         return legal_moves;
     }
 
-    fn apply_transform_impl(&mut self, from: (usize,usize), to: (usize,usize), piece: Option<Piece>) -> bool {
+    fn apply_transform_impl(&mut self, from: Square, to: Square, piece: Option<Piece>) -> bool {
         let capture = self.get(to).is_some();
         self.squares[to.1][to.0] = piece;
         self.squares[from.1][from.0] = None;
         capture
     }
 
-    fn apply_transform(&mut self, from: (usize,usize), to: (usize,usize)) -> bool {
+    fn apply_transform(&mut self, from: Square, to: Square) -> bool {
         self.apply_transform_impl(from, to, self.get(from))
     }
 
@@ -602,7 +648,7 @@ impl Board {
     }
 
     // updates metadata for a move (updates halfmove clock, move number, and side to move)
-    pub fn update_metadata(&mut self, reset_halfmove: bool, en_passant_target: Option<(usize, usize)>) {
+    pub fn update_metadata(&mut self, reset_halfmove: bool, en_passant_target: Option<Square>) {
         if reset_halfmove {
             self.halfmove_clock = 0;
         } else {
@@ -613,49 +659,49 @@ impl Board {
         self.en_passant_target = en_passant_target;
     }
 
-    fn move_validate(&self, chess_move: ChessMove) -> Result<(),String> {
+    fn move_validate(&self, chess_move: ChessMove) -> Result<(),MoveStatus> {
         let (from_file, from_rank) = chess_move.from;
         let (to_file, to_rank) = chess_move.to;
 
         if from_file >= 8 || from_rank >= 8 || to_file >= 8 || to_rank >= 8 {
-            return Err("Move out of bounds".into());
+            return Err(MoveStatus::InvalidOutOfBounds);
         }
 
         let piece_option = self.squares[from_rank][from_file];
         if piece_option.is_none() {
-            return Err("No piece at the source square".into());
+            return Err(MoveStatus::InvalidEmptySquare);
         }
 
         let piece = piece_option.unwrap();
         if piece.color != self.to_move {
-            return Err("It's not this piece's turn to move".into());
+            return Err(MoveStatus::InvalidWrongTurn);
         }
         return Ok(());
     }
 
-    fn move_status(&self,  anal: &BoardAnal, chess_move: ChessMove, piece: Piece) -> Result<MoveStatus, String> {
+    fn move_status(&self,  anal: &BoardAnal, chess_move: ChessMove, piece: Piece) -> Result<(), MoveStatus> {
 
         // check if we are in check now
         let valid_squares = anal.pieces(self.to_move).get(&chess_move.from).unwrap(); // This should be guaranteed as we already checked that there is a piece on the square
 
         if !valid_squares.contains(&chess_move.to) {
-            return Ok(MoveStatus::Illegal);
+            return Err(MoveStatus::Illegal);
         }
 
         let fwd = self.lookahead(chess_move)?;
         if fwd.checking_pieces(self.to_move).len() > 0 {
-            return Ok(MoveStatus::InCheck);
+            return Err(MoveStatus::IllegalInCheck);
         }
         // Castling logic because castling is a special boy that needs its own logic
         if chess_move.delta().0.abs() == 2 && piece.kind == PieceType::King {
             if self.checking_pieces(self.to_move).len() > 0 {
-                return Ok(MoveStatus::InCheck);
+                return Err(MoveStatus::IllegalInCheck);
             }
             let delta = chess_move.delta();
             let final_attackers = self.attacking_pieces(chess_move.to,self.to_move.opposite());
             let transit_attackers = self.attacking_pieces(((chess_move.to.0 as i8 + (1 * (delta.0 / 2))) as usize,chess_move.to.1),self.to_move.opposite());
             if final_attackers.len() > 0 || transit_attackers.len() > 0 {
-                return Ok(MoveStatus::CastleBlocked)
+                return Err(MoveStatus::IllegalCastleBlocked)
             }
         }
         // Promotion logic
@@ -664,19 +710,19 @@ impl Board {
             Color::White => 7,
             Color::Black => 0
         }) && chess_move.promotion.is_none() {
-            return Ok(MoveStatus::NoPromotionNominated);
+            return Err(MoveStatus::IllegalNoPromotionNominated);
         }
         
-        return Ok(MoveStatus::Ok);
+        return Ok(());
     }
 
-    pub fn is_legal(&mut self, anal: &BoardAnal, chess_move: ChessMove) -> Result<MoveStatus, String> {
+    pub fn is_legal(&self, anal: &BoardAnal, chess_move: ChessMove) -> Result<(), MoveStatus> {
         self.move_validate(chess_move)?;
 
         // duplication ew
         let piece_option = self.get(chess_move.from);
         if piece_option.is_none() {
-            return Err("No piece at the source square".into());
+            return Err(MoveStatus::InvalidEmptySquare);
         }
         let piece = piece_option.unwrap();
 
@@ -685,11 +731,11 @@ impl Board {
         
     }
 
-    pub fn apply_move(&mut self, chess_move: ChessMove) -> Result<MoveStatus, String> {
+    pub fn apply_move(&mut self, chess_move: ChessMove) -> Result<(),MoveStatus> {
         // duplication ew
         let piece_option = self.get(chess_move.from);
         if piece_option.is_none() {
-            return Err("No piece at the source square".into());
+            return Err(MoveStatus::InvalidEmptySquare);
         }
         let piece = piece_option.unwrap();
 
@@ -709,7 +755,7 @@ impl Board {
                                 Color::Black => { self.castle_rights.2 = false; self.castle_rights.3 = false}
                             }
                             self.update_metadata(false, None);
-                            return Ok(MoveStatus::Ok);
+                            return Ok(());
                         },
                         // queenside
                         -2 => {
@@ -720,10 +766,10 @@ impl Board {
                                 Color::Black => { self.castle_rights.2 = false; self.castle_rights.3 = false}
                             }
                             self.update_metadata(false, None);
-                            return Ok(MoveStatus::Ok);
+                            return Ok(());
                         }
                         _ => {
-                            return Err("How does your castle have your king moving not two files bro".into()); // Again, this is impossible to reach
+                            return Err(MoveStatus::Invalid); // Again, this is impossible to reach
                         }
                     }
                 }
@@ -735,7 +781,7 @@ impl Board {
                     Color::Black => { self.castle_rights.2 = false; self.castle_rights.3 = false}
                 }
                 self.update_metadata(captured, None);
-                return Ok(MoveStatus::Ok)
+                return Ok(())
             },
             PieceType::Pawn => {
                 // En passant
@@ -747,7 +793,7 @@ impl Board {
                         }) as usize), None);
                         self.apply_move_impl(chess_move);
                         self.update_metadata(true, None);
-                        return Ok(MoveStatus::Ok);
+                        return Ok(());
                     }
                 }
                 // Normal case
@@ -761,27 +807,24 @@ impl Board {
                 } else {
                     self.update_metadata(true,None);
                 }
-                return Ok(MoveStatus::Ok);
+                return Ok(());
             }, 
             PieceType::Rook => {
                 let captured = self.apply_move_impl(chess_move);
                 self.update_metadata(captured, None);
-                return Ok(MoveStatus::Ok);
+                return Ok(());
             }
             _ => {
                 let captured = self.apply_move_impl(chess_move);
                 self.update_metadata(captured, None);
-                return Ok(MoveStatus::Ok);
+                return Ok(());
             }
         }
     }
 
-    pub fn try_move(&mut self, anal: &BoardAnal, chess_move: ChessMove) -> Result<MoveStatus, String> {
-        let status = self.is_legal(anal, chess_move)?;
-        if status != MoveStatus::Ok {
-            return Ok(status);
-        }
-        return self.apply_move(chess_move);
+    pub fn try_move(&mut self, anal: &BoardAnal, chess_move: ChessMove) -> Result<(), MoveStatus> {
+        self.is_legal(anal, chess_move)?;
+        self.apply_move(chess_move)
     }
 }
 
