@@ -5,7 +5,8 @@
 // this is a simple evaluator that solely checks material. Its called GreedEval because its greedy and likes to hoard material
 
 use crate::engine::evaluation::Evaluator;
-use crate::game::{PieceType,BoardAnal};
+use crate::game::BoardStatus::Checkmate;
+use crate::game::{PieceType,BoardAnal,BoardStatus};
 
 // piece value in centipawns
 fn piece_table(piece_type: PieceType) -> i32 {
@@ -29,6 +30,10 @@ impl Evaluator for GreedEval {
                     score += piece_table(piece.kind) * if piece.color == anal.board.to_move { 1 } else { -1 };
                 }
             }
+        }
+        // Checkmate
+        if anal.board_status() == BoardStatus::Checkmate {
+            score = -10000
         }
         score
     }
