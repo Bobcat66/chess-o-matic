@@ -88,7 +88,7 @@ pub fn negamax_search<E: Evaluator>(board: Board, depth: usize, threads: usize) 
 
     // Main negamax thread
     let mut alpha = i32::MIN;
-    let mut beta = i32::MAX;
+    let beta = i32::MAX;
     let anal = &board.anal();
 
     // TT probe
@@ -103,8 +103,9 @@ pub fn negamax_search<E: Evaluator>(board: Board, depth: usize, threads: usize) 
         }
     }
 
+    // Degenerate case, Realistically this will basically never get called.
     if depth == 0 || anal.board_status().terminal() {
-        return quiescence::<E>(tt, anal, alpha, beta);
+        return SearchResult{ best_move: *anal.legal_moves.get(0).unwrap(), best_score: E::eval(anal) };
     }
 
     let mut best = i32::MIN;
@@ -113,29 +114,16 @@ pub fn negamax_search<E: Evaluator>(board: Board, depth: usize, threads: usize) 
 
     for chess_move in &moves {
         let child = anal.lookahead(*chess_move).unwrap();
-        let score = -negamax::<E>(tt, &child, depth - 1, -beta, -alpha);
+        let score = -negamax::<E>(&tt, &child, depth - 1, -beta, -alpha);
         if score > best {
             best = score;
             best_move = Some(*chess_move);
         }
         alpha = cmp::max(alpha, score);
-        if alpha >= beta {
-            break;
-        }
     }
 
-    // TT store
-    let node_type = if best <= original_alpha {
-        NodeType::UpperBound
-    } else if best >= beta {
-        NodeType::LowerBound
-    } else {
-        NodeType::Exact
-    };
-    tt.insert(&anal.board, depth,best, best_move, node_type);
-    
-    
-    SearchResult::new(ChessMove::new((0,0),(0,0),None),0) // placeholder
+    tt.insert(&anal.board, depth,best, best_move, NodeType::Exact);
+    return SearchResult { best_move: best_move.unwrap(), best_score: best };
 }
 
 fn negamax<E: Evaluator>(tt: &Arc<TranspositionTable>, anal: &BoardAnal, depth: usize, alpha: i32, beta: i32) -> i32 {
@@ -234,3 +222,4 @@ fn quiescence<E: Evaluator>(tt: &Arc<TranspositionTable>, anal: &BoardAnal, alph
     tt.insert(&anal.board, 0, alpha, best_move, node_type);
     alpha
 }
+

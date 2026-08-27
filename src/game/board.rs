@@ -338,7 +338,7 @@ fn move_status(board: &Board, anal: &RawAnal, chess_move: ChessMove) -> Result<(
         }
         let delta = chess_move.delta();
         let final_attackers = board.attacking_pieces(chess_move.to,board.to_move.opposite());
-        let transit_attackers = board.attacking_pieces(((chess_move.to.0 as i8 + (1 * (delta.0 / 2))) as usize,chess_move.to.1),board.to_move.opposite());
+        let transit_attackers = board.attacking_pieces(((chess_move.to.0 as i8 - (1 * (delta.0 / 2))) as usize,chess_move.to.1),board.to_move.opposite());
         if final_attackers.len() > 0 || transit_attackers.len() > 0 {
             return Err(MoveStatus::IllegalCastleBlocked)
         }
