@@ -16,7 +16,7 @@ fn piece_table(piece_type: PieceType) -> i32 {
         PieceType::Knight => 300,
         PieceType::Rook => 500,
         PieceType::Queen => 900,
-        PieceType::King => 10000
+        PieceType::King => 1000000
     }
 }
 pub struct GreedEval {}
@@ -33,7 +33,7 @@ impl Evaluator for GreedEval {
         }
         // Checkmate
         if anal.board_status() == BoardStatus::Checkmate {
-            score = -10000
+            score = -1000000
         }
         score
     }
