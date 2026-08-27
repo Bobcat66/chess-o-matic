@@ -70,7 +70,7 @@ fn main() {
         stdin.lock().read_line(&mut line).unwrap();
         let line = line.trim(); // strips the trailing newline
         let player_move = ChessMove::from_uci(line).unwrap();
-        game_board.try_move(&anal, ChessMove::from_uci(line).unwrap()).unwrap();
+        game_board.try_move(&anal, player_move).unwrap();
         println!("{}", game_board.render_ascii());
         println!("Thinking...");
         let computer_move = negamax_search::<GreedEval>(tt, game_board, 4, 0).unwrap();
