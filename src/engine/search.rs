@@ -54,6 +54,11 @@ impl TranspositionTable {
             best_move: best_move,
             node_type: node_type
         };
+        if let Some(entry) = self.get(board) {
+            if entry.depth > depth {
+                return None;
+            }
+        }
         self.table.insert(hash, entry)
     }
 }
@@ -70,12 +75,11 @@ impl SearchResult {
     }
 }
 // This is an implementation of the negamax algorithm with alpha-beta pruning. Partial claude slop
-pub fn negamax_search<E: Evaluator>(board: Board, depth: usize, threads: usize) -> SearchResult {
-    let keys = ZobristKeys::new();
-    let tt = Arc::new(TranspositionTable::new(keys)); // tt: TranspositionTable
+pub fn negamax_search<E: Evaluator>(tt_data: TranspositionTable, board: Board, depth: usize, helper_threads: usize) -> Option<SearchResult> {
+    let tt = Arc::new(tt_data); // tt: TranspositionTable
 
     let mut handles = Vec::new();
-    for thread_id in 0..threads {
+    for thread_id in 0..helper_threads {
         let tt = Arc::clone(&tt); // cheap — bumps a reference count
         let board = board.clone();
         let start_depth = 1 + (thread_id % 3);
@@ -84,8 +88,6 @@ pub fn negamax_search<E: Evaluator>(board: Board, depth: usize, threads: usize) 
             negamax::<E>(&tt, &(board.anal()), start_depth.max(depth), i32::MIN, i32::MAX)
         }));
     }
-    for h in handles { h.join().unwrap(); } // Results are discarded as we only care about TT contributions
-
     // Main negamax thread
     let mut alpha = i32::MIN;
     let beta = i32::MAX;
@@ -94,18 +96,17 @@ pub fn negamax_search<E: Evaluator>(board: Board, depth: usize, threads: usize) 
     // TT probe
     if let Some(entry) = tt.get(&board) {
         if entry.depth >= depth {
+            // Chopped lol
             match entry.node_type {
-                NodeType::Exact if entry.best_move.is_some() => return SearchResult { best_move: entry.best_move.unwrap(), best_score: entry.score },
-                NodeType::LowerBound if entry.score >= beta && entry.best_move.is_some() => return SearchResult { best_move: entry.best_move.unwrap(), best_score: entry.score },
-                NodeType::UpperBound if entry.score <= alpha && entry.best_move.is_some() => return SearchResult { best_move: entry.best_move.unwrap(), best_score: entry.score },
+                NodeType::Exact if entry.best_move.is_some() => return Some(SearchResult { best_move: entry.best_move.unwrap(), best_score: entry.score }),
                 _ => {}
             }
         }
     }
 
-    // Degenerate case, Realistically this will basically never get called.
+    // Degenerate case
     if depth == 0 || anal.board_status().terminal() {
-        return SearchResult{ best_move: *anal.legal_moves.get(0).unwrap(), best_score: E::eval(anal) };
+        return None;
     }
 
     let mut best = i32::MIN;
@@ -122,8 +123,11 @@ pub fn negamax_search<E: Evaluator>(board: Board, depth: usize, threads: usize) 
         alpha = cmp::max(alpha, score);
     }
 
+    // Join all helper threads
+    for h in handles { h.join().unwrap(); } // Results are discarded as we only care about TT contributions
+
     tt.insert(&anal.board, depth,best, best_move, NodeType::Exact);
-    return SearchResult { best_move: best_move.unwrap(), best_score: best };
+    return Some(SearchResult { best_move: best_move.unwrap(), best_score: best });
 }
 
 fn negamax<E: Evaluator>(tt: &Arc<TranspositionTable>, anal: &BoardAnal, depth: usize, alpha: i32, beta: i32) -> i32 {
