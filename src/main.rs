@@ -52,5 +52,13 @@ fn main() {
     // Castling smoketest
     evergreen_board.try_move(&(evergreen_board.anal()),ChessMove::from_uci("e1g1").unwrap()).unwrap();
     println!("{}", evergreen_board.render_ascii());
+
+    // simple unfinished CLI game
+    let mut game_board = Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").unwrap();
+    loop {
+        let anal = board.anal();
+        if anal.board_status().terminal() { break; }
+        println!("{}", game_board.render_ascii());
+    }
     
 }
