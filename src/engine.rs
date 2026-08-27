@@ -5,8 +5,6 @@
 
 use crate::game::{Board, BoardAnal ,Color};
 
-mod search;
-mod evaluation;
-
-pub use evaluation::Evaluator;
+pub mod search;
+pub mod evaluation;
 

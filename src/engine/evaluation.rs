@@ -8,3 +8,5 @@ use crate::game::BoardAnal;
 pub trait Evaluator {
     fn eval(anal: &BoardAnal) -> i32;
 }
+
+pub use greedeval::GreedEval;

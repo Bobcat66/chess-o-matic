@@ -5,7 +5,12 @@
 mod game;
 mod engine;
 
-use game::{Board, ChessMove};
+use std::io::{self, BufRead, Write};
+use game::{Board, ChessMove, ZobristKeys};
+use engine::search::{negamax_search,TranspositionTable};
+use engine::evaluation::GreedEval;
+
+
 fn main() {
     // TODO: Move this into an actual test suite
     let mut board = Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").unwrap();
@@ -53,12 +58,26 @@ fn main() {
     evergreen_board.try_move(&(evergreen_board.anal()),ChessMove::from_uci("e1g1").unwrap()).unwrap();
     println!("{}", evergreen_board.render_ascii());
 
-    // simple unfinished CLI game
+    // simple CLI game, cobbled togetger
     let mut game_board = Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").unwrap();
     loop {
-        let anal = board.anal();
+        let tt = TranspositionTable::new(ZobristKeys::new());
+        let mut anal = game_board.anal();
         if anal.board_status().terminal() { break; }
         println!("{}", game_board.render_ascii());
+        let stdin = io::stdin();
+        let mut line = String::new();
+        stdin.lock().read_line(&mut line).unwrap();
+        let line = line.trim(); // strips the trailing newline
+        let player_move = ChessMove::from_uci(line).unwrap();
+        game_board.try_move(&anal, ChessMove::from_uci(line).unwrap()).unwrap();
+        println!("{}", game_board.render_ascii());
+        println!("Thinking...");
+        let computer_move = negamax_search::<GreedEval>(tt, game_board, 4, 0).unwrap();
+        println!("The Computer plays {}!", computer_move.best_move);
+        anal = game_board.anal();
+        game_board.try_move(&anal, computer_move.best_move).unwrap();
+        
     }
     
 }

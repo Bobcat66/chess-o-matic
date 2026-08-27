@@ -4,7 +4,7 @@
 
 // TODO: Move ordering
 
-use crate::engine::Evaluator;
+use crate::engine::evaluation::Evaluator;
 use crate::game::{Color,Board,BoardAnal,ChessMove,BoardStatus,ZobristKeys};
 use std::cmp;
 use std::thread;
@@ -14,9 +14,12 @@ use rand::rngs::StdRng;
 use rand::SeedableRng;
 use std::sync::Arc;
 
+const INF: i32 = i32::MAX - 1; // leaves headroom so -INF doesn't overflow
+const NEG_INF: i32 = -INF;
+
 // Claude Slop
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct TTEntry {
+pub struct TTEntry {
     depth: usize,             // how deep this result was searched to
     score: i32,             // the evaluated/searched score
     best_move: Option<ChessMove>,  // best move found, useful for move ordering
@@ -24,14 +27,14 @@ struct TTEntry {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum NodeType {
+pub enum NodeType {
     Exact,      // score is the true minimax value
     LowerBound, // score is at least this good (search was cut off by a beta cutoff)
     UpperBound, // score is at most this good (search never raised alpha)
 }
 
 // Me Slop
-struct TranspositionTable {
+pub struct TranspositionTable {
     keys: ZobristKeys,
     table: DashMap<u64,TTEntry>
 }
@@ -65,8 +68,8 @@ impl TranspositionTable {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SearchResult {
-    best_move: ChessMove,
-    best_score: i32
+    pub best_move: ChessMove,
+    pub best_score: i32
 }
 
 impl SearchResult {
@@ -89,8 +92,8 @@ pub fn negamax_search<E: Evaluator>(tt_data: TranspositionTable, board: Board, d
         }));
     }
     // Main negamax thread
-    let mut alpha = i32::MIN;
-    let beta = i32::MAX;
+    let mut alpha = NEG_INF;
+    let beta = INF;
     let anal = &board.anal();
 
     // TT probe

@@ -4,7 +4,7 @@
 
 // this is a simple evaluator that solely checks material. Its called GreedEval because its greedy and likes to hoard material
 
-use crate::engine::Evaluator;
+use crate::engine::evaluation::Evaluator;
 use crate::game::{PieceType,BoardAnal};
 
 // piece value in centipawns
