@@ -33,7 +33,7 @@ impl Evaluator for GreedEval {
         }
         // Checkmate
         if anal.board_status() == BoardStatus::Checkmate {
-            score = -1000000
+            score = -1000000;
         }
         score
     }
