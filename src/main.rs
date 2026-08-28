@@ -4,14 +4,17 @@
 
 mod game;
 mod engine;
+mod interface;
 
 use std::io::{self, BufRead, Write};
 use game::{Board, ChessMove, ZobristKeys};
 use engine::search::{negamax_search,TranspositionTable};
 use engine::evaluation::GreedEval;
-
+use engine::Engine;
+use std::sync::Arc;
 
 fn main() {
+    /* 
     // TODO: Move this into an actual test suite
     let mut board = Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").unwrap();
 
@@ -57,27 +60,25 @@ fn main() {
     // Castling smoketest
     evergreen_board.try_move(&(evergreen_board.anal()),ChessMove::from_uci("e1g1").unwrap()).unwrap();
     println!("{}", evergreen_board.render_ascii());
+    */
 
     // simple CLI game, cobbled togetger
-    let mut game_board = Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").unwrap();
+    let game_board = Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").unwrap();
+    let mut engine = Engine::<GreedEval>::new(ZobristKeys::new(),game_board);
     loop {
-        let tt = TranspositionTable::new(ZobristKeys::new());
-        let mut anal = game_board.anal();
+        let anal = engine.board.anal();
         if anal.board_status().terminal() { break; }
-        println!("{}", game_board.render_ascii());
+        println!("{}", engine.board.render_ascii());
         let stdin = io::stdin();
         let mut line = String::new();
         stdin.lock().read_line(&mut line).unwrap();
         let line = line.trim(); // strips the trailing newline
         let player_move = ChessMove::from_uci(line).unwrap();
-        game_board.try_move(&anal, player_move).unwrap();
-        println!("{}", game_board.render_ascii());
+        engine.submit_move(player_move).unwrap();
+        println!("{}", engine.board.render_ascii());
         println!("Thinking...");
-        let computer_move = negamax_search::<GreedEval>(tt, game_board, 4, 0).unwrap();
-        println!("The Computer plays {}!", computer_move.best_move);
-        anal = game_board.anal();
-        game_board.try_move(&anal, computer_move.best_move).unwrap();
-        
+        let computer_move = engine.next(4, 0).unwrap();
+        println!("The Computer plays {}!", computer_move);        
     }
     
 }

@@ -78,8 +78,7 @@ impl SearchResult {
     }
 }
 // This is an implementation of the negamax algorithm with alpha-beta pruning. Partial claude slop
-pub fn negamax_search<E: Evaluator>(tt_data: TranspositionTable, board: Board, depth: usize, helper_threads: usize) -> Option<SearchResult> {
-    let tt = Arc::new(tt_data); // tt: TranspositionTable
+pub fn negamax_search<E: Evaluator>(tt: Arc<TranspositionTable>, board: Board, depth: usize, helper_threads: usize) -> Option<SearchResult> {
 
     let mut handles = Vec::new();
     for thread_id in 0..helper_threads {
